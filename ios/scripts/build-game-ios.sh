@@ -42,19 +42,15 @@ cp "$IOS/boot/addon/"* "$PROJ/addons/ios_boot/"
 "$IOS/boot/build.sh" ios "$PROJ/addons/ios_boot" "$PCK_SIZE" "$GAME_VERSION" "$STEAM_PCK_SIZE"
 "$IOS/scripts/fetch-gdextensions.sh" "$PROJ/addons" "${EXT_CACHE:-$WORK/ext-cache}"
 
-log "Building the app"
-BOOTSTRAP_OVERLAY="$WORK/bootstrap" APP_EXTRA_DIR="$WORK/app-extra" \
-    "$IOS/scripts/build-godot-ios.sh" "$PROJ" StS2 "$OUT"
-
 # The app's page in iOS Settings: a Settings.bundle at the .app root makes
 # iOS show our preference items there; the support assembly reads the
 # chosen values back through CFPreferences at startup (IosSettings.cs).
-log "Adding Settings.bundle to the app"
-INJ="$(mktemp -d)"
-unzip -q -o "$OUT/StS2.ipa" -d "$INJ"
-cp -R "$IOS/Settings.bundle" "$INJ"/Payload/*.app/Settings.bundle
-(cd "$INJ" && zip -q -r -X "$OUT/StS2.ipa.new" Payload && mv "$OUT/StS2.ipa.new" "$OUT/StS2.ipa")
-rm -rf "$INJ"
+# app-extra is copied into the .app by build-godot-ios.sh before packaging.
+cp -R "$IOS/Settings.bundle" "$WORK/app-extra/Settings.bundle"
+
+log "Building the app"
+BOOTSTRAP_OVERLAY="$WORK/bootstrap" APP_EXTRA_DIR="$WORK/app-extra" \
+    "$IOS/scripts/build-godot-ios.sh" "$PROJ" StS2 "$OUT"
 
 log "Checking the bundle"
 APP_LIST="$(unzip -l "$OUT/StS2.ipa")"
