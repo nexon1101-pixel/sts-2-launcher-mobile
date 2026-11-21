@@ -33,8 +33,17 @@ public static class Hooks
     {
         Run("diagnostics", Diagnostics.Log);
         Run("frame watch", FrameWatch.Start);
-        Run("render scale", RenderScale.Apply);
-        Run("two-finger right click", TouchRightClick.Install);
+        Run("ios settings", IosSettings.Apply);
+        Run(
+            "two-finger right click",
+            () =>
+            {
+                if (IosSettings.TwoFingerEnabled)
+                    TouchRightClick.Install();
+                else
+                    Note("two-finger right click: disabled in iOS Settings");
+            }
+        );
     }
 
     public static void Note(string message) => GD.Print($"{Tag} {message}");

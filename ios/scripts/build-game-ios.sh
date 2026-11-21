@@ -46,11 +46,22 @@ log "Building the app"
 BOOTSTRAP_OVERLAY="$WORK/bootstrap" APP_EXTRA_DIR="$WORK/app-extra" \
     "$IOS/scripts/build-godot-ios.sh" "$PROJ" StS2 "$OUT"
 
+# The app's page in iOS Settings: a Settings.bundle at the .app root makes
+# iOS show our preference items there; the support assembly reads the
+# chosen values back through CFPreferences at startup (IosSettings.cs).
+log "Adding Settings.bundle to the app"
+INJ="$(mktemp -d)"
+unzip -q -o "$OUT/StS2.ipa" -d "$INJ"
+cp -R "$IOS/Settings.bundle" "$INJ"/Payload/*.app/Settings.bundle
+(cd "$INJ" && zip -q -r -X "$OUT/StS2.ipa.new" Payload && mv "$OUT/StS2.ipa.new" "$OUT/StS2.ipa")
+rm -rf "$INJ"
+
 log "Checking the bundle"
 APP_LIST="$(unzip -l "$OUT/StS2.ipa")"
 for required in \
     "Frameworks/sts2.framework/sts2" \
     "Frameworks/libios_boot.ios.framework/libios_boot.ios" \
+    "Settings.bundle/Root.plist" \
     "StS2.pck"; do
     if ! grep -q "Payload/[^/]*\.app/$required\$" <<<"$APP_LIST"; then
         echo "ERROR: $required missing from StS2.ipa" >&2

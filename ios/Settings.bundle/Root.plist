@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PreferenceSpecifiers</key>
+	<array>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>軽量化（ゲーム内設定にない項目）</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>描画スケール</string>
+			<key>Key</key>
+			<string>quality_preset</string>
+			<key>DefaultValue</key>
+			<string>light</string>
+			<key>Titles</key>
+			<array>
+				<string>オフ（標準画質）</string>
+				<string>軽め（0.75倍で描画）</string>
+				<string>がっつり（0.5倍で描画）</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<string>off</string>
+				<string>light</string>
+				<string>aggressive</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>操作</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Title</key>
+			<string>2本指タップで右クリック</string>
+			<key>Key</key>
+			<string>two_finger_right_click</string>
+			<key>DefaultValue</key>
+			<true/>
+		</dict>
+	</array>
+	<key>StringsTable</key>
+	<string>Root</string>
+</dict>
+</plist>
