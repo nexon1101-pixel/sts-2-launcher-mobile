@@ -21,6 +21,17 @@ namespace Sts2Ios;
 // and injects a synthetic right press / motion / release through
 // Input.ParseInputEvent.
 //
+// The device crash log for the re-feed version (StS2-2026-11-21-155924)
+// shows why the naive re-feed wedged: Input::flush_buffered_events ->
+// _parse_input_event_impl -> DisplayServerAppleEmbedded::
+// _dispatch_input_events -> _window_callback -> this callback. Every
+// event Input processes is dispatched to the window callback again,
+// so a re-fed event comes straight back here; re-feeding it again
+// loops forever and the FrontBoard watchdog kills the app
+// (0x8BADF00D, scene-update). Defence: every event the pump feeds is
+// stamped with metadata first, and the callback drops stamped events
+// instead of enqueueing them again.
+//
 // What the game does with a right press (verified in sts2.dll):
 //   - a card selected for targeting is cancelled (NMouseCardPlay._Input)
 //   - map drawing in mouse-mode stops (NMouseModeMapDrawingInput)
@@ -28,6 +39,8 @@ namespace Sts2Ios;
 // the right press is the one the game acts on.
 internal static class TouchRightClick
 {
+    private const string FedMark = "sts2_ios_fed";
+
     private static readonly Queue<InputEvent> Pending = new();
     private static readonly HashSet<int> FingersDown = new();
     private static int _primary = -1;
@@ -47,9 +60,13 @@ internal static class TouchRightClick
     }
 
     // OS callback context: enqueue only. Never touch Input or game state
-    // from here.
+    // from here. Events stamped by the pump are echoes of events Input
+    // already processed (see the header note) — drop them, or the feed
+    // loops forever.
     private static void OnInputEvent(InputEvent ev)
     {
+        if (ev.HasMeta(FedMark))
+            return;
         lock (Pending)
             Pending.Enqueue(ev);
     }
@@ -67,6 +84,7 @@ internal static class TouchRightClick
 
         foreach (var ev in batch)
         {
+            ev.SetMeta(FedMark, true);
             Input.ParseInputEvent(ev);
             switch (ev)
             {
@@ -124,6 +142,7 @@ internal static class TouchRightClick
                 Relative = drag.Relative,
                 ButtonMask = MouseButtonMask.Right,
             };
+            motion.SetMeta(FedMark, true);
             Input.ParseInputEvent(motion);
         }
     }
@@ -138,6 +157,7 @@ internal static class TouchRightClick
             GlobalPosition = _cursor,
             ButtonMask = pressed ? MouseButtonMask.Right : (MouseButtonMask)0,
         };
+        ev.SetMeta(FedMark, true);
         Input.ParseInputEvent(ev);
     }
 }
