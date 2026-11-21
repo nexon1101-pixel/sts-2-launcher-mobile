@@ -57,8 +57,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GODOT_VERSION: "4.5.1"
-  GODOT_BASE_URL: https://github.com/godotengine/godot/releases/download/4.5.1-stable
+  GODOT_VERSION: "4.7.2"
+  GODOT_BASE_URL: https://github.com/godotengine/godot/releases/download/4.7.2-stable
   STS2_APP_ID: "2868840"
   SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.source || 'fake' }}
   # 1 = prepare-game.sh converts the pck's BC textures to ASTC. Push runs
