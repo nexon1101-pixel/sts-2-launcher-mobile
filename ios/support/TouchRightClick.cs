@@ -32,6 +32,12 @@ public static class TouchRightClick
 
     private static void OnInputEvent(InputEvent ev)
     {
+        // On iOS this callback REPLACES the engine's own input feed: events
+        // delivered here never reach the Input singleton on their own, so
+        // every event must be re-fed first. Without this the game gets no
+        // input at all (title screen renders but ignores every tap).
+        Input.ParseInputEvent(ev);
+
         switch (ev)
         {
             case InputEventScreenTouch touch:
