@@ -18,7 +18,7 @@
 			<key>Key</key>
 			<string>quality_preset</string>
 			<key>DefaultValue</key>
-			<string>light</string>
+			<string>off</string>
 			<key>Titles</key>
 			<array>
 				<string>オフ（標準画質）</string>

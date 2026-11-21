@@ -67,7 +67,7 @@ internal static class IosSettings
 
     public static void Apply()
     {
-        string preset = ReadString("quality_preset") ?? "light";
+        string preset = ReadString("quality_preset") ?? "off";
         Hooks.Note($"ios settings: quality_preset={preset}");
         switch (preset)
         {
