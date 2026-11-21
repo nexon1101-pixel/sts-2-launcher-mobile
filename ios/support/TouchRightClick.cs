@@ -90,7 +90,7 @@ public static class TouchRightClick
             Pressed = pressed,
             Position = _cursor,
             GlobalPosition = _cursor,
-            ButtonMask = pressed ? MouseButtonMask.Right : MouseButtonMask.None,
+            ButtonMask = pressed ? MouseButtonMask.Right : (MouseButtonMask)0,
         });
     }
 
