@@ -35,13 +35,13 @@ public static class Hooks
         Run("frame watch", FrameWatch.Start);
         Run("ios settings", IosSettings.Apply);
         Run(
-            "two-finger right click",
+            "touch gestures",
             () =>
             {
-                if (IosSettings.TwoFingerEnabled)
+                if (IosSettings.TwoFingerEnabled || IosSettings.ThreeFingerEscEnabled)
                     TouchRightClick.Install();
                 else
-                    Note("two-finger right click: disabled in iOS Settings");
+                    Note("touch gestures: disabled in iOS Settings");
             }
         );
     }

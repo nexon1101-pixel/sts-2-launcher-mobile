@@ -72,6 +72,17 @@ internal static class IosSettings
         }
     }
 
+    private static bool? _threeFingerEsc;
+
+    public static bool ThreeFingerEscEnabled
+    {
+        get
+        {
+            _threeFingerEsc ??= ReadBool("three_finger_esc") ?? true;
+            return _threeFingerEsc.Value;
+        }
+    }
+
     public static void Apply()
     {
         // The Settings page slider: 1.0 is the game's standard quality,

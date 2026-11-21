@@ -3,11 +3,19 @@ using Godot;
 
 namespace Sts2Ios;
 
-// Two-finger touch = right click.
+// Touch gestures the game has no touch path for:
+//   - two-finger touch = right click
+//   - three-finger tap = Escape key (back / pause)
 //
 // What the game does with a right press (verified in sts2.dll):
 //   - a card selected for targeting is cancelled (NMouseCardPlay._Input)
 //   - map drawing in mouse-mode stops (NMouseModeMapDrawingInput)
+//
+// The three-finger tap passes through the two-finger state on its way,
+// so the synthetic right click is pressed and released again within the
+// same gesture before the Escape key goes out. In the screens where Esc
+// is wanted (menus, map, pause) that brief right click is inert; the
+// gesture is not meant for mid-targeting use.
 //
 // Mechanism (confirmed against the Godot source behaviour after three
 // failed attempts, see below): the root Window's own input handler
@@ -40,17 +48,24 @@ internal static class TouchRightClick
     private static int _primary = -1;
     private static Vector2 _cursor;
     private static bool _rightDown;
+    private static bool _twoFinger;
+    private static bool _threeFingerEsc;
+    private static bool _escFired;
 
     public static void Install()
     {
         if (Engine.GetMainLoop() is not SceneTree tree)
         {
-            Hooks.Note("two-finger right click: no SceneTree, not installed");
+            Hooks.Note("touch gestures: no SceneTree, not installed");
             return;
         }
+        _twoFinger = IosSettings.TwoFingerEnabled;
+        _threeFingerEsc = IosSettings.ThreeFingerEscEnabled;
         _root = tree.Root;
         _root.WindowInput += OnWindowInput;
-        Hooks.Note("two-finger right click installed (WindowInput)");
+        Hooks.Note(
+            $"touch gestures installed (WindowInput): two-finger right click={_twoFinger}, three-finger esc={_threeFingerEsc}"
+        );
     }
 
     private static void OnWindowInput(InputEvent ev)
@@ -76,10 +91,21 @@ internal static class TouchRightClick
                 _cursor = touch.Position;
             }
             FingersDown.Add(touch.Index);
-            if (FingersDown.Count == 2 && !_rightDown)
+            if (FingersDown.Count == 2 && _twoFinger && !_rightDown)
             {
                 _rightDown = true;
                 SendMouseButton(MouseButton.Right, true);
+            }
+            if (FingersDown.Count == 3 && _threeFingerEsc && !_escFired)
+            {
+                _escFired = true;
+                if (_rightDown)
+                {
+                    _rightDown = false;
+                    SendMouseButton(MouseButton.Right, false);
+                }
+                SendEscape();
+                Hooks.Note("three-finger tap: escape sent");
             }
         }
         else
@@ -93,7 +119,10 @@ internal static class TouchRightClick
                 SendMouseButton(MouseButton.Right, false);
             }
             if (FingersDown.Count == 0)
+            {
                 _primary = -1;
+                _escFired = false;
+            }
         }
     }
 
@@ -112,6 +141,24 @@ internal static class TouchRightClick
             };
             _root?.PushInput(motion);
         }
+    }
+
+    private static void SendEscape()
+    {
+        var press = new InputEventKey
+        {
+            Keycode = Key.Escape,
+            PhysicalKeycode = Key.Escape,
+            Pressed = true,
+        };
+        _root?.PushInput(press);
+        var release = new InputEventKey
+        {
+            Keycode = Key.Escape,
+            PhysicalKeycode = Key.Escape,
+            Pressed = false,
+        };
+        _root?.PushInput(release);
     }
 
     private static void SendMouseButton(MouseButton button, bool pressed)
