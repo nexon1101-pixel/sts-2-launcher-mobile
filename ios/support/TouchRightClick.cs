@@ -32,6 +32,20 @@ namespace Sts2Ios;
 // stamped with metadata first, and the callback drops stamped events
 // instead of enqueueing them again.
 //
+// Run #20 (queue + stamp + ParseInputEvent only) then showed the other
+// half of the mechanism: the game stayed alive but received NO input
+// at all. So on this display server the window callback does not just
+// observe the feed — it replaces the step that delivers events into
+// the scene tree. ParseInputEvent updates Input's own state (and
+// generates the touch-emulated mouse events, which arrive at the
+// callback as fresh events), but nothing reaches the game's nodes
+// unless it is pushed into the root viewport explicitly. The pump
+// therefore also calls Root.PushInput for every event it processes,
+// except raw screen touch/drag: those are delivered through their
+// emulated mouse counterparts, the same way a stock mobile export
+// feeds a desktop-oriented game, so buttons don't see a touch and a
+// click for the same tap.
+//
 // What the game does with a right press (verified in sts2.dll):
 //   - a card selected for targeting is cancelled (NMouseCardPlay._Input)
 //   - map drawing in mouse-mode stops (NMouseModeMapDrawingInput)
@@ -43,9 +57,11 @@ internal static class TouchRightClick
 
     private static readonly Queue<InputEvent> Pending = new();
     private static readonly HashSet<int> FingersDown = new();
+    private static Window _root;
     private static int _primary = -1;
     private static Vector2 _cursor;
     private static bool _rightDown;
+    private static bool _pumpSeen;
 
     public static void Install()
     {
@@ -54,9 +70,10 @@ internal static class TouchRightClick
             Hooks.Note("two-finger right click: no SceneTree, not installed");
             return;
         }
+        _root = tree.Root;
         DisplayServer.WindowSetInputEventCallback(Callable.From<InputEvent>(OnInputEvent));
         tree.ProcessFrame += Pump;
-        Hooks.Note("two-finger right click installed (queued feed)");
+        Hooks.Note("two-finger right click installed (queued feed + push)");
     }
 
     // OS callback context: enqueue only. Never touch Input or game state
@@ -82,10 +99,24 @@ internal static class TouchRightClick
             Pending.Clear();
         }
 
+        if (!_pumpSeen)
+        {
+            _pumpSeen = true;
+            Hooks.Note($"input pump alive, first batch {batch.Count} events");
+        }
+
         foreach (var ev in batch)
         {
             ev.SetMeta(FedMark, true);
             Input.ParseInputEvent(ev);
+            // Raw touch/drag reach the game through the emulated mouse
+            // events Input generates from them (those come back through
+            // the callback unstamped and are pumped like everything
+            // else). Everything else is pushed into the scene tree
+            // directly — with the callback registered, nothing delivers
+            // it there otherwise.
+            if (ev is not InputEventScreenTouch && ev is not InputEventScreenDrag)
+                _root?.PushInput(ev);
             switch (ev)
             {
                 case InputEventScreenTouch touch:
@@ -144,6 +175,7 @@ internal static class TouchRightClick
             };
             motion.SetMeta(FedMark, true);
             Input.ParseInputEvent(motion);
+            _root?.PushInput(motion);
         }
     }
 
@@ -159,5 +191,6 @@ internal static class TouchRightClick
         };
         ev.SetMeta(FedMark, true);
         Input.ParseInputEvent(ev);
+        _root?.PushInput(ev);
     }
 }
