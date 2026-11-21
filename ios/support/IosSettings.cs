@@ -11,7 +11,7 @@ namespace Sts2Ios;
 // are read back here through CFPreferences at startup.
 //
 // Only controls the game's own settings don't offer live here: the render
-// scale preset (the game cannot change its rendering resolution at all)
+// scale slider (the game cannot change its rendering resolution at all)
 // and the two-finger right-click toggle. Every read failure falls back to
 // the defaults below, so a problem here can never break startup.
 internal static class IosSettings
@@ -20,6 +20,7 @@ internal static class IosSettings
         "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
 
     private const uint Utf8 = 0x08000100; // kCFStringEncodingUTF8
+    private const long NumberDoubleType = 13; // kCFNumberDoubleType
 
     [DllImport(CoreFoundation)]
     private static extern IntPtr CFPreferencesCopyAppValue(IntPtr key, IntPtr applicationId);
@@ -52,6 +53,12 @@ internal static class IosSettings
     private static extern bool CFBooleanGetValue(IntPtr boolean);
 
     [DllImport(CoreFoundation)]
+    private static extern IntPtr CFNumberGetTypeID();
+
+    [DllImport(CoreFoundation)]
+    private static extern bool CFNumberGetValue(IntPtr number, long type, out double value);
+
+    [DllImport(CoreFoundation)]
     private static extern void CFRelease(IntPtr obj);
 
     private static bool? _twoFinger;
@@ -67,20 +74,20 @@ internal static class IosSettings
 
     public static void Apply()
     {
-        string preset = ReadString("quality_preset") ?? "off";
-        Hooks.Note($"ios settings: quality_preset={preset}");
-        switch (preset)
+        // The Settings page slider: 1.0 is the game's standard quality,
+        // lower renders at that fraction of the resolution.
+        double scale = ReadNumber("render_scale") ?? 1.0;
+        if (scale < 0.4)
+            scale = 0.4;
+        if (scale > 1.0)
+            scale = 1.0;
+        Hooks.Note($"ios settings: render_scale={scale:0.00}");
+        if (scale >= 0.999)
         {
-            case "off":
-                Hooks.Note("ios settings: render scale off");
-                break;
-            case "aggressive":
-                RenderScale.Apply(2.0f); // renders at 0.5x
-                break;
-            default: // "light"
-                RenderScale.Apply(1.3333f); // renders at ~0.75x
-                break;
+            Hooks.Note("ios settings: render scale off");
+            return;
         }
+        RenderScale.Apply((float)(1.0 / scale));
     }
 
     private static string ReadString(string key)
@@ -99,6 +106,33 @@ internal static class IosSettings
                     return null;
                 int length = Array.IndexOf(buffer, (byte)0);
                 return Encoding.UTF8.GetString(buffer, 0, length < 0 ? buffer.Length : length);
+            }
+            finally
+            {
+                CFRelease(value);
+            }
+        }
+        catch (Exception e)
+        {
+            Hooks.Note($"ios settings: reading '{key}' failed: {e.Message}");
+            return null;
+        }
+    }
+
+    private static double? ReadNumber(string key)
+    {
+        try
+        {
+            var value = CopyAppValue(key);
+            if (value == IntPtr.Zero)
+                return null;
+            try
+            {
+                if (CFGetTypeID(value) != CFNumberGetTypeID())
+                    return null;
+                return CFNumberGetValue(value, NumberDoubleType, out double result)
+                    ? result
+                    : null;
             }
             finally
             {

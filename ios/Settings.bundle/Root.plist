@@ -12,25 +12,17 @@
 		</dict>
 		<dict>
 			<key>Type</key>
-			<string>PSMultiValueSpecifier</string>
+			<string>PSSliderSpecifier</string>
 			<key>Title</key>
-			<string>描画スケール</string>
+			<string>描画スケール（右端＝標準画質、左に寄せるほど軽い）</string>
 			<key>Key</key>
-			<string>quality_preset</string>
+			<string>render_scale</string>
 			<key>DefaultValue</key>
-			<string>off</string>
-			<key>Titles</key>
-			<array>
-				<string>オフ（標準画質）</string>
-				<string>軽め（0.75倍で描画）</string>
-				<string>がっつり（0.5倍で描画）</string>
-			</array>
-			<key>Values</key>
-			<array>
-				<string>off</string>
-				<string>light</string>
-				<string>aggressive</string>
-			</array>
+			<real>1</real>
+			<key>MinimumValue</key>
+			<real>0.4</real>
+			<key>MaximumValue</key>
+			<real>1</real>
 		</dict>
 		<dict>
 			<key>Type</key>
