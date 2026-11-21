@@ -33,6 +33,8 @@ public static class Hooks
     {
         Run("diagnostics", Diagnostics.Log);
         Run("frame watch", FrameWatch.Start);
+        Run("render scale", RenderScale.Apply);
+        Run("two-finger right click", TouchRightClick.Install);
     }
 
     public static void Note(string message) => GD.Print($"{Tag} {message}");
