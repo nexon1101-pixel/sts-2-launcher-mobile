@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -6,62 +5,41 @@ namespace Sts2Ios;
 
 // Two-finger touch = right click.
 //
-// On iOS the DisplayServer input-event callback REPLACES the engine's own
-// input feed: events delivered to the callback never reach the Input
-// singleton on their own. The first version of this file ignored events
-// (all input died); the second re-fed them with Input.ParseInputEvent
-// from inside the callback (the game wedged on the splash screen —
-// re-entering the input system from the OS callback, before the main
-// loop is in its normal frame flow, is not safe).
-//
-// So the callback now does nothing but enqueue. A per-frame pump,
-// subscribed to SceneTree.ProcessFrame like FrameWatch, drains the
-// queue in frame context: it re-feeds every real event in arrival
-// order, then runs the two-finger state machine on the touch events
-// and injects a synthetic right press / motion / release through
-// Input.ParseInputEvent.
-//
-// The device crash log for the re-feed version (StS2-2026-11-21-155924)
-// shows why the naive re-feed wedged: Input::flush_buffered_events ->
-// _parse_input_event_impl -> DisplayServerAppleEmbedded::
-// _dispatch_input_events -> _window_callback -> this callback. Every
-// event Input processes is dispatched to the window callback again,
-// so a re-fed event comes straight back here; re-feeding it again
-// loops forever and the FrontBoard watchdog kills the app
-// (0x8BADF00D, scene-update). Defence: every event the pump feeds is
-// stamped with metadata first, and the callback drops stamped events
-// instead of enqueueing them again.
-//
-// Run #20 (queue + stamp + ParseInputEvent only) then showed the other
-// half of the mechanism: the game stayed alive but received NO input
-// at all. So on this display server the window callback does not just
-// observe the feed — it replaces the step that delivers events into
-// the scene tree. ParseInputEvent updates Input's own state (and
-// generates the touch-emulated mouse events, which arrive at the
-// callback as fresh events), but nothing reaches the game's nodes
-// unless it is pushed into the root viewport explicitly. The pump
-// therefore also calls Root.PushInput for every event it processes,
-// except raw screen touch/drag: those are delivered through their
-// emulated mouse counterparts, the same way a stock mobile export
-// feeds a desktop-oriented game, so buttons don't see a touch and a
-// click for the same tap.
-//
 // What the game does with a right press (verified in sts2.dll):
 //   - a card selected for targeting is cancelled (NMouseCardPlay._Input)
 //   - map drawing in mouse-mode stops (NMouseModeMapDrawingInput)
-// The platform's own touch-emulated left press still happens alongside;
-// the right press is the one the game acts on.
+//
+// Mechanism (confirmed against the Godot source behaviour after three
+// failed attempts, see below): the root Window's own input handler
+// emits the WindowInput signal for every event right before it pushes
+// the event into the scene tree. Subscribing to that signal observes
+// raw touches (and everything else) in order, without disturbing the
+// stock delivery at all. The two-finger state machine runs there;
+// synthetic right press / motion / release events are delivered with
+// Root.PushInput, the same call the stock handler makes.
+//
+// Failed attempts, for the record:
+//   - DisplayServer.WindowSetInputEventCallback replaces the main
+//     window's stock callback (Window._window_input, which ends in
+//     push_input), so merely registering it starved the game of all
+//     input (run #15: title screen unresponsive).
+//   - Re-feeding events with Input.ParseInputEvent from inside that
+//     callback looped: the callback is invoked at the end of
+//     _parse_input_event_impl, so each re-fed event was dispatched
+//     straight back; the FrontBoard watchdog killed the app
+//     (0x8BADF00D; device crash log StS2-2026-11-21-155924, run #17).
+//   - Queueing the callback's events and re-feeding them from a
+//     per-frame pump (with metadata stamps against the echo) avoided
+//     the loop but still delivered nothing into the scene tree — and
+//     re-feeding already-processed touches would double Input's state
+//     and duplicate the emulated clicks anyway (run #20).
 internal static class TouchRightClick
 {
-    private const string FedMark = "sts2_ios_fed";
-
-    private static readonly Queue<InputEvent> Pending = new();
     private static readonly HashSet<int> FingersDown = new();
     private static Window _root;
     private static int _primary = -1;
     private static Vector2 _cursor;
     private static bool _rightDown;
-    private static bool _pumpSeen;
 
     public static void Install()
     {
@@ -71,61 +49,20 @@ internal static class TouchRightClick
             return;
         }
         _root = tree.Root;
-        DisplayServer.WindowSetInputEventCallback(Callable.From<InputEvent>(OnInputEvent));
-        tree.ProcessFrame += Pump;
-        Hooks.Note("two-finger right click installed (queued feed + push)");
+        _root.WindowInput += OnWindowInput;
+        Hooks.Note("two-finger right click installed (WindowInput)");
     }
 
-    // OS callback context: enqueue only. Never touch Input or game state
-    // from here. Events stamped by the pump are echoes of events Input
-    // already processed (see the header note) — drop them, or the feed
-    // loops forever.
-    private static void OnInputEvent(InputEvent ev)
+    private static void OnWindowInput(InputEvent ev)
     {
-        if (ev.HasMeta(FedMark))
-            return;
-        lock (Pending)
-            Pending.Enqueue(ev);
-    }
-
-    private static void Pump()
-    {
-        List<InputEvent> batch;
-        lock (Pending)
+        switch (ev)
         {
-            if (Pending.Count == 0)
-                return;
-            batch = new List<InputEvent>(Pending);
-            Pending.Clear();
-        }
-
-        if (!_pumpSeen)
-        {
-            _pumpSeen = true;
-            Hooks.Note($"input pump alive, first batch {batch.Count} events");
-        }
-
-        foreach (var ev in batch)
-        {
-            ev.SetMeta(FedMark, true);
-            Input.ParseInputEvent(ev);
-            // Raw touch/drag reach the game through the emulated mouse
-            // events Input generates from them (those come back through
-            // the callback unstamped and are pumped like everything
-            // else). Everything else is pushed into the scene tree
-            // directly — with the callback registered, nothing delivers
-            // it there otherwise.
-            if (ev is not InputEventScreenTouch && ev is not InputEventScreenDrag)
-                _root?.PushInput(ev);
-            switch (ev)
-            {
-                case InputEventScreenTouch touch:
-                    OnTouch(touch);
-                    break;
-                case InputEventScreenDrag drag:
-                    OnDrag(drag);
-                    break;
-            }
+            case InputEventScreenTouch touch:
+                OnTouch(touch);
+                break;
+            case InputEventScreenDrag drag:
+                OnDrag(drag);
+                break;
         }
     }
 
@@ -173,8 +110,6 @@ internal static class TouchRightClick
                 Relative = drag.Relative,
                 ButtonMask = MouseButtonMask.Right,
             };
-            motion.SetMeta(FedMark, true);
-            Input.ParseInputEvent(motion);
             _root?.PushInput(motion);
         }
     }
@@ -189,8 +124,6 @@ internal static class TouchRightClick
             GlobalPosition = _cursor,
             ButtonMask = pressed ? MouseButtonMask.Right : (MouseButtonMask)0,
         };
-        ev.SetMeta(FedMark, true);
-        Input.ParseInputEvent(ev);
         _root?.PushInput(ev);
     }
 }
