@@ -11,9 +11,10 @@ namespace Sts2Ios;
 // are read back here through CFPreferences at startup.
 //
 // Only controls the game's own settings don't offer live here: the render
-// scale slider (the game cannot change its rendering resolution at all)
-// and the two-finger right-click toggle. Every read failure falls back to
-// the defaults below, so a problem here can never break startup.
+// scale slider (the game cannot change its rendering resolution at all),
+// the touch gesture toggles, and the silent-mode sound toggle. Every read
+// failure falls back to the defaults below, so a problem here can never
+// break startup.
 internal static class IosSettings
 {
     private const string CoreFoundation =
@@ -80,6 +81,17 @@ internal static class IosSettings
         {
             _threeFingerEsc ??= ReadBool("three_finger_esc") ?? true;
             return _threeFingerEsc.Value;
+        }
+    }
+
+    private static bool? _soundInSilentMode;
+
+    public static bool SoundInSilentModeEnabled
+    {
+        get
+        {
+            _soundInSilentMode ??= ReadBool("sound_in_silent_mode") ?? true;
+            return _soundInSilentMode.Value;
         }
     }
 

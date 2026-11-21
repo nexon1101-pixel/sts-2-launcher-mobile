@@ -34,6 +34,7 @@ public static class Hooks
         Run("diagnostics", Diagnostics.Log);
         Run("frame watch", FrameWatch.Start);
         Run("ios settings", IosSettings.Apply);
+        Run("audio session", AudioSession.Apply);
         Run(
             "touch gestures",
             () =>
