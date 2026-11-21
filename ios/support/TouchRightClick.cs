@@ -1,113 +1,143 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 
 namespace Sts2Ios;
 
-// Two fingers on the screen act as a right mouse click, mirroring the PC
-// controls the touch build cannot express: a right press cancels a card
-// being played (NMouseCardPlay cancels on a right-button press) and, in
-// the map's held drawing mode, draws while held.
+// Two-finger touch = right click.
 //
-// Raw touches are observed through DisplayServer's input-event callback:
-// the support assembly cannot register its own Node subclasses, so, like
-// FrameWatch, everything hangs off engine-level hooks. Synthetic events go
-// through Input.ParseInputEvent, which reaches the game's _Input handlers
-// exactly like real mouse events. The platform's own touch-emulated left
-// events still flow alongside; the right press is what the game acts on.
-public static class TouchRightClick
+// On iOS the DisplayServer input-event callback REPLACES the engine's own
+// input feed: events delivered to the callback never reach the Input
+// singleton on their own. The first version of this file ignored events
+// (all input died); the second re-fed them with Input.ParseInputEvent
+// from inside the callback (the game wedged on the splash screen —
+// re-entering the input system from the OS callback, before the main
+// loop is in its normal frame flow, is not safe).
+//
+// So the callback now does nothing but enqueue. A per-frame pump,
+// subscribed to SceneTree.ProcessFrame like FrameWatch, drains the
+// queue in frame context: it re-feeds every real event in arrival
+// order, then runs the two-finger state machine on the touch events
+// and injects a synthetic right press / motion / release through
+// Input.ParseInputEvent.
+//
+// What the game does with a right press (verified in sts2.dll):
+//   - a card selected for targeting is cancelled (NMouseCardPlay._Input)
+//   - map drawing in mouse-mode stops (NMouseModeMapDrawingInput)
+// The platform's own touch-emulated left press still happens alongside;
+// the right press is the one the game acts on.
+internal static class TouchRightClick
 {
-    private static readonly HashSet<int> _fingers = new();
+    private static readonly Queue<InputEvent> Pending = new();
+    private static readonly HashSet<int> FingersDown = new();
     private static int _primary = -1;
     private static Vector2 _cursor;
     private static bool _rightDown;
-    private static bool _installed;
 
     public static void Install()
     {
-        if (_installed) return;
-        _installed = true;
+        if (Engine.GetMainLoop() is not SceneTree tree)
+        {
+            Hooks.Note("two-finger right click: no SceneTree, not installed");
+            return;
+        }
         DisplayServer.WindowSetInputEventCallback(Callable.From<InputEvent>(OnInputEvent));
-        Hooks.Note("two-finger right click installed");
+        tree.ProcessFrame += Pump;
+        Hooks.Note("two-finger right click installed (queued feed)");
     }
 
+    // OS callback context: enqueue only. Never touch Input or game state
+    // from here.
     private static void OnInputEvent(InputEvent ev)
     {
-        // On iOS this callback REPLACES the engine's own input feed: events
-        // delivered here never reach the Input singleton on their own, so
-        // every event must be re-fed first. Without this the game gets no
-        // input at all (title screen renders but ignores every tap).
-        Input.ParseInputEvent(ev);
+        lock (Pending)
+            Pending.Enqueue(ev);
+    }
 
-        switch (ev)
+    private static void Pump()
+    {
+        List<InputEvent> batch;
+        lock (Pending)
         {
-            case InputEventScreenTouch touch:
-                if (touch.Pressed)
-                {
-                    if (_fingers.Add(touch.Index))
-                    {
-                        if (_primary < 0)
-                        {
-                            _primary = touch.Index;
-                            _cursor = touch.Position;
-                        }
-                        if (_fingers.Count == 2 && !_rightDown)
-                        {
-                            _rightDown = true;
-                            SendButton(pressed: true);
-                        }
-                    }
-                }
-                else if (_fingers.Remove(touch.Index))
-                {
-                    if (_rightDown && _fingers.Count < 2)
-                    {
-                        _rightDown = false;
-                        SendButton(pressed: false);
-                    }
-                    if (touch.Index == _primary)
-                    {
-                        _primary = -1;
-                        foreach (var other in _fingers)
-                        {
-                            _primary = other;
-                            break;
-                        }
-                    }
-                    if (_fingers.Count == 0) _primary = -1;
-                }
-                break;
+            if (Pending.Count == 0)
+                return;
+            batch = new List<InputEvent>(Pending);
+            Pending.Clear();
+        }
 
-            case InputEventScreenDrag drag:
-                if (drag.Index == _primary && _fingers.Count > 0)
-                {
-                    var relative = drag.Position - _cursor;
-                    _cursor = drag.Position;
-                    if (_rightDown) SendMotion(relative);
-                }
-                break;
+        foreach (var ev in batch)
+        {
+            Input.ParseInputEvent(ev);
+            switch (ev)
+            {
+                case InputEventScreenTouch touch:
+                    OnTouch(touch);
+                    break;
+                case InputEventScreenDrag drag:
+                    OnDrag(drag);
+                    break;
+            }
         }
     }
 
-    private static void SendButton(bool pressed)
+    private static void OnTouch(InputEventScreenTouch touch)
     {
-        Input.ParseInputEvent(new InputEventMouseButton
+        if (touch.Pressed)
         {
-            ButtonIndex = MouseButton.Right,
+            if (FingersDown.Count == 0)
+            {
+                _primary = touch.Index;
+                _cursor = touch.Position;
+            }
+            FingersDown.Add(touch.Index);
+            if (FingersDown.Count == 2 && !_rightDown)
+            {
+                _rightDown = true;
+                SendMouseButton(MouseButton.Right, true);
+            }
+        }
+        else
+        {
+            FingersDown.Remove(touch.Index);
+            if (touch.Index == _primary)
+                _primary = -1;
+            if (FingersDown.Count < 2 && _rightDown)
+            {
+                _rightDown = false;
+                SendMouseButton(MouseButton.Right, false);
+            }
+            if (FingersDown.Count == 0)
+                _primary = -1;
+        }
+    }
+
+    private static void OnDrag(InputEventScreenDrag drag)
+    {
+        if (drag.Index == _primary)
+            _cursor = drag.Position;
+        if (_rightDown && drag.Index == _primary)
+        {
+            var motion = new InputEventMouseMotion
+            {
+                Position = _cursor,
+                GlobalPosition = _cursor,
+                Relative = drag.Relative,
+                ButtonMask = MouseButtonMask.Right,
+            };
+            Input.ParseInputEvent(motion);
+        }
+    }
+
+    private static void SendMouseButton(MouseButton button, bool pressed)
+    {
+        var ev = new InputEventMouseButton
+        {
+            ButtonIndex = button,
             Pressed = pressed,
             Position = _cursor,
             GlobalPosition = _cursor,
             ButtonMask = pressed ? MouseButtonMask.Right : (MouseButtonMask)0,
-        });
-    }
-
-    private static void SendMotion(Vector2 relative)
-    {
-        Input.ParseInputEvent(new InputEventMouseMotion
-        {
-            Position = _cursor,
-            GlobalPosition = _cursor,
-            Relative = relative,
-            ButtonMask = MouseButtonMask.Right,
-        });
+        };
+        Input.ParseInputEvent(ev);
     }
 }
